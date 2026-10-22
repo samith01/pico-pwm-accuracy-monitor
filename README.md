@@ -12,15 +12,22 @@ desired and measured values.
 | File | Runs on | Purpose |
 |------|---------|---------|
 | `main.py` | Pico (MicroPython) | PWM output, PIO measurement, UART link, interactive prompt and sweep |
-| `plot_results.py` | PC (Python 3 + matplotlib) | Plots sweep results into `set_vs_measured.png` and `error.png` |
-| `set_vs_measured.png`, `error.png` | — | Generated graphs (currently **simulated**, see below) |
+| `pwm_math.py` | Pico and PC | The calculations (duty conversion, PIO counts to percent, UART message format, input checking, error stats). No hardware code, so it can be unit tested on a PC |
+| `board_test.py` | Pico | `BoardTest` class: hardware tests with PASS/FAIL, saves the sweep to `results.csv` |
+| `test_pwm_math.py` | PC | `TestPwmMath` class: unit tests for `pwm_math.py` and the simulation model |
+| `plot_results.py` | PC (Python 3 + matplotlib) | Plots `results.csv` into `set_vs_measured.png` and `error.png` and prints the error summary |
+| `set_vs_measured.png`, `error.png` | — | Generated graphs. The graph title says whether they come from the board or the simulation |
 
 ## Hardware setup
 
-We have one board, so a single Pico plays both roles:
+`ROLE` at the top of `main.py` picks the setup:
 
-- "Pico A" = PWM output on GP15 + UART0 (GP0 TX, GP1 RX)
-- "Pico B" = PIO edge timer on GP11 + UART1 (GP8 TX, GP9 RX)
+- `"both"` (default): one Pico plays both roles.
+  - "Pico A" = PWM output on GP15 + UART0 (GP0 TX, GP1 RX)
+  - "Pico B" = PIO edge timer on GP11 + UART1 (GP8 TX, GP9 RX)
+- `"A"` / `"B"`: two Picos. Put `main.py` and `pwm_math.py` on both boards, set
+  `ROLE = "A"` on the sender and `ROLE = "B"` on the receiver. Start B first.
+  The pins are the same, so the same three wires go between the boards, plus GND to GND.
 
 Three jumper wires:
 
@@ -45,29 +52,59 @@ Three jumper wires:
    Pico A prints desired, measured and difference.
 
 Duty cycles 0 % and 100 % are rejected: a flat signal has no edges for the PIO to time.
-Timeouts on UART and PIO report which wire to check instead of hanging.
+Timeouts on UART and PIO report which wire to check instead of hanging. GP11 has a
+pull-down, so an unplugged PWM wire reads as "no edges" instead of random noise.
 
 ## Running
 
-1. Flash MicroPython onto the Pico and open `main.py` in Thonny.
+1. Flash MicroPython onto the Pico. In Thonny, upload `main.py` and `pwm_math.py` to it.
 2. Wire the three jumpers above and run `main.py`.
 3. At the prompt, type a duty cycle (1–99) to test one value, or `sweep` to test 1–99 %
    and print CSV.
 4. Press Stop / Ctrl+C to end. PWM and PIO are switched off and GP15 is left LOW.
 
+## Testing
+
+There are two kinds of tests.
+
+**Unit tests (PC, no board needed).** `test_pwm_math.py` tests every function in
+`pwm_math.py` (normal values, edge values like 1 % and 99 %, and bad input like letters,
+`nan`, corrupted UART bytes) and checks the ideal-hardware model is within 0.01 points.
+Only the standard library is needed:
+
+```
+python -m unittest -v
+```
+
+**Hardware tests (on the Pico).** Upload `board_test.py` too and run it in Thonny.
+The `BoardTest` class runs:
+
+| Test | What it checks | Pass if |
+|------|----------------|---------|
+| Spot checks | 10, 25, 50, 75, 90 % | each within `TOLERANCE` (0.1 points) |
+| Repeatability | 50 % measured 10 times | spread (max − min) within 0.1 points |
+| Full sweep | every duty 1–99 % | all 99 measured, worst error within 0.1 points |
+| Unplugged wires (optional, manual) | unplug each of the three wires in turn | program reports an error naming the wire, no hang |
+
+It prints PASS/FAIL for each and a total, and saves the sweep to `results.csv` on the Pico.
+
 ## Plotting results
+
+1. Run `board_test.py` on the Pico (above).
+2. In Thonny, open View > Files, right-click `results.csv` on the Pico side and choose
+   Download, into this folder.
+3. Run:
 
 ```
 pip install matplotlib
 python plot_results.py
 ```
 
-- If `results.csv` exists, the script plots it. To make it: copy the sweep output from
-  Thonny (starting at the line `set,measured,diff`) into `results.csv`.
-- If `results.csv` is missing, the script plots **simulated** data from a model of ideal
-  hardware (125 MHz clock, PWM counter of 62500 per period, 2-cycle PIO loops). Graph titles
-  then say "(SIMULATED)". The current graphs in this repo are simulated and will be
-  replaced by a real hardware sweep for the final report.
+The script prints the mean and largest error and saves both graphs, titled
+"(measured on board)". If `results.csv` is missing it plots **simulated** data from a
+model of ideal hardware instead (125 MHz clock, PWM counter of 62500 per period, 2-cycle
+PIO loops) and the titles say "(SIMULATED)". On ideal hardware the largest error is
+0.0016 points.
 
 ## References
 
@@ -85,6 +122,8 @@ Code sources (tagged in the code comments as `[S#]`):
 10. MicroPython developers. (n.d.). *ports/rp2/machine_pwm.c*. GitHub. https://github.com/micropython/micropython/blob/master/ports/rp2/machine_pwm.c
 11. Python Software Foundation. (n.d.). *csv – CSV file reading and writing*. https://docs.python.org/3/library/csv.html
 12. Matplotlib development team. (n.d.). *matplotlib.pyplot*. https://matplotlib.org/stable/api/pyplot_summary.html
+13. Python Software Foundation. (n.d.). *unittest – Unit testing framework*. https://docs.python.org/3/library/unittest.html
+14. MicroPython developers. (n.d.). *builtins – builtin functions and exceptions* (`open`). https://docs.micropython.org/en/latest/library/builtins.html
 
 Tools: MicroPython firmware (MIT license), Thonny IDE (MIT license), Git and GitHub.
 
