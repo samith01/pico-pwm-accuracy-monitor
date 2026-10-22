@@ -143,6 +143,4 @@ Tools: MicroPython firmware (MIT license), Thonny IDE (MIT license), Git and Git
 
 ## Contributions
 
-All code not tagged with a source is the group's own: the PIO edge-timer logic, the UART
-message format, error handling, and the sweep. The FIFO clear/restart before each
-measurement was Ryan's and Klara's idea.
+All code not tagged with a source is the group's own
