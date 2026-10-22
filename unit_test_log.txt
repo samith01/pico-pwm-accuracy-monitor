@@ -1,0 +1,22 @@
+# py -m unittest -v   (2026-10-22 12:23, Python 3.14.7)
+test_average_duty (test_pwm_math.TestPwmMath.test_average_duty) ... ok
+test_average_duty_bad_input (test_pwm_math.TestPwmMath.test_average_duty_bad_input) ... ok
+test_counts_to_duty (test_pwm_math.TestPwmMath.test_counts_to_duty) ... ok
+test_counts_to_duty_no_signal (test_pwm_math.TestPwmMath.test_counts_to_duty_no_signal) ... ok
+test_duty_to_u16_always_goes_up (test_pwm_math.TestPwmMath.test_duty_to_u16_always_goes_up) ... ok
+test_duty_to_u16_ends (test_pwm_math.TestPwmMath.test_duty_to_u16_ends) ... ok
+test_duty_to_u16_middle (test_pwm_math.TestPwmMath.test_duty_to_u16_middle) ... ok
+test_error_stats (test_pwm_math.TestPwmMath.test_error_stats) ... ok
+test_error_stats_empty (test_pwm_math.TestPwmMath.test_error_stats_empty) ... ok
+test_format_message (test_pwm_math.TestPwmMath.test_format_message) ... ok
+test_input_not_a_number (test_pwm_math.TestPwmMath.test_input_not_a_number) ... ok
+test_input_out_of_range (test_pwm_math.TestPwmMath.test_input_out_of_range) ... ok
+test_message_round_trip (test_pwm_math.TestPwmMath.test_message_round_trip) ... ok
+test_parse_message_bad_data (test_pwm_math.TestPwmMath.test_parse_message_bad_data) ... ok
+test_simulated_sweep_is_accurate (test_pwm_math.TestPwmMath.test_simulated_sweep_is_accurate) ... ok
+test_valid_input (test_pwm_math.TestPwmMath.test_valid_input) ... ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 0.015s
+
+OK

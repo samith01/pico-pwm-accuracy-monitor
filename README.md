@@ -76,6 +76,8 @@ Only the standard library is needed:
 python -m unittest -v
 ```
 
+The output of our last run (16 tests, all passing) is saved in `unit_test_log.txt`.
+
 **Hardware tests (on the Pico).** Upload `board_test.py` too and run it in Thonny.
 The `BoardTest` class runs:
 
