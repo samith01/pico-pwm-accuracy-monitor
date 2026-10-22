@@ -1,4 +1,4 @@
-# main.py - Pico PWM Accuracy Monitor (one-board version)
+# main.py - Pico PWM Accuracy Monitor
 # SED 1115 Group 5 - Samith Fernando, Ryan Hannum Horne, Klara Kerekes
 #
 # What it does:
@@ -6,17 +6,23 @@
 #   Pico B measures the real duty cycle with PIO edge timing and sends it back.
 #   Both sides print the difference between desired and measured.
 #
-# We only have one board, so one Pico plays both roles:
-#   "Pico A" = PWM output on GP15 + UART0
-#   "Pico B" = PIO edge timer on GP11 + UART1
+# Set ROLE below to pick how the code runs:
+#   "both" - one Pico plays both roles (our normal setup, one board):
+#              "Pico A" = PWM output on GP15 + UART0
+#              "Pico B" = PIO edge timer on GP11 + UART1
+#   "A"    - this board is the sender (PWM + prompt) in a two-board setup
+#   "B"    - this board is the receiver (measures and replies) in a two-board setup
+# The pins are the same in every mode, so the wiring below works for both.
 #
-# Wires (3 jumpers on the same Pico):
+# Wires (3 jumpers; on two boards also connect GND to GND):
 #   GP15 (A PWM out)  -> GP11 (B PIO in)    carries the PWM signal itself
 #   GP0  (A UART0 TX) -> GP9  (B UART1 RX)  A sends the desired duty to B
 #   GP8  (B UART1 TX) -> GP1  (A UART0 RX)  B sends the measured duty back to A
 #
 # Usage in Thonny: type a duty cycle (1-99) to test one value,
 # or type "sweep" to test 1-99 % and print CSV for plot_results.py.
+# For the full test run (spot checks, repeatability, saved results.csv)
+# run board_test.py instead.
 # Press Ctrl+C (Stop) to end; PWM and PIO are switched off cleanly.
 #
 # Sources (cited in the code as [S#]):
@@ -45,11 +51,14 @@
 from machine import Pin, PWM, UART
 import rp2
 import time
+from pwm_math import (duty_to_u16, average_duty, format_message, parse_message,
+                      parse_duty_input)
 
+ROLE = "both"        # "both" (one board), "A" (sender) or "B" (receiver)
 PWM_PIN = 15         # Pico A: PWM output pin
 MEASURE_PIN = 11     # Pico B: PIO input pin
 PWM_FREQ = 1000      # Hz, fixed frequency (only duty changes)
-SAMPLES = 10         # PWM periods averaged per measurement (raise to 100 for final tests)
+SAMPLES = 100        # PWM periods averaged per measurement (100 periods = 0.1 s)
 
 
 # ======================================================================
@@ -61,7 +70,7 @@ pwm.freq(PWM_FREQ)
 
 def set_duty(percent):
     """Set PWM duty in percent (0-100). duty_u16 uses 0-65535 for 0-100 % [S1]."""
-    pwm.duty_u16(int(percent * 65535 / 100))
+    pwm.duty_u16(duty_to_u16(percent))
 
 
 # ======================================================================
@@ -94,7 +103,9 @@ def edge_timer():
     push()
 
 
-measure_pin = Pin(MEASURE_PIN, Pin.IN)
+# Pull-down keeps GP11 LOW if the PWM wire is unplugged. Without it the pin
+# floats and noise can look like edges, giving a random "measurement".
+measure_pin = Pin(MEASURE_PIN, Pin.IN, Pin.PULL_DOWN)
 # jmp_pin lets "jmp(pin, ...)" check GP11; in_base lets "wait(..., pin, 0)" watch GP11
 sm = rp2.StateMachine(0, edge_timer, in_base=measure_pin, jmp_pin=measure_pin)  # [S3]
 sm.active(1)
@@ -123,14 +134,13 @@ def pio_duty(samples=SAMPLES, timeout_ms=100):
     sm.restart()
     sm.active(1)
 
-    total = 0
+    pairs = []
     for _ in range(samples):
         pair = read_pair(timeout_ms)
         if pair is None:
             return None
-        high, low = pair
-        total += high * 100 / (high + low)  # duty (%) = active time / period * 100
-    return total / samples
+        pairs.append(pair)
+    return average_duty(pairs)   # duty (%) = HIGH time / period * 100, averaged
 
 
 # ======================================================================
@@ -149,11 +159,7 @@ def read_line(uart, timeout_ms=1000):
         if time.ticks_diff(time.ticks_ms(), start) > timeout_ms:
             return None
     time.sleep_ms(20)            # let the rest of the line arrive
-    line = uart.readline()
-    try:
-        return float(line.decode().strip())
-    except (ValueError, AttributeError):
-        return None
+    return parse_message(uart.readline())
 
 
 def pico_b_step(verbose):
@@ -167,7 +173,7 @@ def pico_b_step(verbose):
     if measured is None:
         print("B: no PWM edges - check GP15->GP11")
         measured = -1
-    uart_b.write("%.4f\n" % measured)
+    uart_b.write(format_message(measured))
     if verbose:
         print("B: desired %.2f  measured %.4f  diff %+.4f" % (desired, measured, measured - desired))
 
@@ -175,10 +181,16 @@ def pico_b_step(verbose):
 def run_once(duty, verbose=True):
     """One full round trip: A sets PWM and sends, B measures and replies, A compares.
     Returns the measured duty, or None on any error."""
+    # Throw away any leftover bytes (e.g. noise from a wire being re-plugged)
+    # so they don't get glued onto the front of this round's messages.
+    for uart in (uart_a, uart_b):
+        if uart.any():
+            uart.read()
     set_duty(duty)
     time.sleep_ms(50)            # let PWM settle on the new duty
-    uart_a.write("%.4f\n" % duty)
-    pico_b_step(verbose)         # on two boards this runs on Pico B instead
+    uart_a.write(format_message(duty))
+    if ROLE == "both":
+        pico_b_step(verbose)     # on two boards this runs on Pico B instead
     measured = read_line(uart_a)
     if measured is None:
         print("A: message not received - check GP8->GP1")
@@ -192,35 +204,57 @@ def run_once(duty, verbose=True):
 
 
 def sweep():
-    """Test every duty from 1 to 99 % and print CSV (copy into results.csv)."""
+    """Test every duty from 1 to 99 % and print CSV (copy into results.csv).
+    Returns the results as a list of (set, measured) so board_test.py can save them."""
+    results = []
     print("set,measured,diff")
     for duty in range(1, 100):
         measured = run_once(duty, verbose=False)
         if measured is not None:
             print("%d,%.4f,%.4f" % (duty, measured, measured - duty))
+            results.append((duty, measured))
+    return results
 
 
-# ======================================================================
-# Main loop
-# ======================================================================
-try:
+def shutdown():
+    """Stop PIO, stop PWM and leave GP15 LOW so nothing keeps toggling."""
+    sm.active(0)
+    pwm.deinit()
+    Pin(PWM_PIN, Pin.OUT).value(0)
+    print("Stopped. PWM and PIO switched off.")
+
+
+def prompt_loop():
+    """Pico A (or one board): ask the user for a duty cycle and test it."""
     while True:
         user_input = input("Duty cycle (1-99) or 'sweep': ").strip()
         if user_input == "sweep":
             sweep()
             continue
-        try:
-            duty = float(user_input)
-        except ValueError:
-            print("Please enter a valid number (no letters or symbols).")
-            continue
-        if not 1 <= duty <= 99:  # 0 and 100 % have no edges for the PIO to time
-            print("Duty cycle has to be from 1-99 percent.")
+        duty, problem = parse_duty_input(user_input)
+        if problem:
+            print(problem)
             continue
         run_once(duty)
-finally:
-    # Clean shutdown on Stop/Ctrl+C: stop PIO, stop PWM, leave GP15 LOW
-    sm.active(0)
-    pwm.deinit()
-    Pin(PWM_PIN, Pin.OUT).value(0)
-    print("Stopped. PWM and PIO switched off.")
+
+
+def receiver_loop():
+    """Pico B on its own board: wait for a request, measure, reply, forever."""
+    print("Pico B ready, waiting for Pico A...")
+    while True:
+        if uart_b.any():
+            pico_b_step(verbose=True)
+
+
+# ======================================================================
+# Main loop
+# ======================================================================
+# Only runs when main.py is run directly, not when board_test.py imports it.
+if __name__ == "__main__":
+    try:
+        if ROLE == "B":
+            receiver_loop()
+        else:
+            prompt_loop()
+    finally:
+        shutdown()               # clean shutdown on Stop/Ctrl+C
