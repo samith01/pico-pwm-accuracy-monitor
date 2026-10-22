@@ -106,6 +106,20 @@ model of ideal hardware instead (125 MHz clock, PWM counter of 62500 per period,
 PIO loops) and the titles say "(SIMULATED)". On ideal hardware the largest error is
 0.0016 points.
 
+## Results
+
+`results.csv` is a real sweep from the board (1–99 %, 1 kHz, 100 periods averaged per
+point). The graphs in this repo are made from it.
+
+- All 99 duty cycles were measured.
+- Mean absolute error: **0.0108** percentage points.
+- Largest error: **0.0319** percentage points (at 47 %).
+- Every point is within the 0.1-point `TOLERANCE` used by `board_test.py`.
+
+The error is spread evenly above and below zero with no trend across the range, so it
+looks like small period-to-period noise rather than a fixed offset. It is about 20 times
+the ideal-hardware model's 0.0016 points, but still well under 0.1 points.
+
 ## References
 
 Code sources (tagged in the code comments as `[S#]`):
